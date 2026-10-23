@@ -170,7 +170,7 @@ def clean_text(raw_text):
 
     return None
 
-def validate_metadata(meta):
+def validate_metadata(meta, allow_topic_fallback=False):
     if not isinstance(meta, dict):
         raise ValueError("Metadata is not a valid dictionary.")
 
@@ -211,6 +211,12 @@ def validate_metadata(meta):
             h_clean = f"#{h_clean}"
         cleaned_hashtags.append(h_clean)
     meta["hashtags"] = cleaned_hashtags
+
+    
+    topic = meta.get("inferred_topic", "").strip()
+    if not topic:
+        if not allow_topic_fallback:
+            raise ValueError("Topic is missing or empty.")
 
     return True
 
@@ -268,6 +274,7 @@ Required JSON structure:
 
     try:
         model_idx = 0
+        topic_retry_used = False
         consecutive_model_failures = 0
 
         while validation_attempts_used < max_validation_attempts:
@@ -355,7 +362,20 @@ Required JSON structure:
                     model_idx += 1
                     continue
 
-                validate_metadata(meta)
+                # Validate metadata with topic retry handling
+                try:
+                    validate_metadata(meta, allow_topic_fallback=False)
+                except ValueError as err:
+                    if "Topic is missing" in str(err) and not topic_retry_used:
+                        print("[meta] topic missing in response, retrying once explicitly...", flush=True)
+                        topic_retry_used = True
+                        continue
+                    elif "Topic is missing" in str(err):
+                        print("[meta] topic fallback used", flush=True)
+                        meta["inferred_topic"] = "General Entertainment"
+                        validate_metadata(meta, allow_topic_fallback=True)
+                    else:
+                        raise
                 # Validation passed!
                 meta["path"] = "video_ai_gemini"
                 meta["model_used"] = current_model
